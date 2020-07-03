@@ -1,0 +1,7 @@
+*.out
+*.d
+*.o
+*.so
+tmp/
+out/
+docs/html/
