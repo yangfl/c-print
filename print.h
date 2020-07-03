@@ -1,7 +1,8 @@
-#include <stdio.h>
-
 #ifndef PRINT_H
 #define PRINT_H
+
+#include <stdio.h>
+#include <stdint.h>
 
 
 #define PRINT__PRIMITIVE_CAT(a, ...) a ## __VA_ARGS__
@@ -213,9 +214,27 @@
 
 // format
 
-#define PRINT_GET_FORMAT_SPECIFIER_SEP(sep, arg) _Generic((arg), \
+#define PRINT__IS_PRINT__CDR(x) PRINT__CHECK(PRINT__PRIMITIVE_CAT(PRINT__IS_PRINT__CDR_, x))
+#define PRINT__IS_PRINT__CDR_PRINT__CDR ~, 1,
+#define PRINT__CDR1(x) PRINT__IF(PRINT__IS_PRINT__CDR(PRINT__EXPAND(PRINT__CDR x))) (x) (PRINT__EXPAND(PRINT__CDR x))
+
+#define PRINT__IS_PRINT__CAR(x) PRINT__CHECK(PRINT__PRIMITIVE_CAT(PRINT__IS_PRINT__CAR_, x))
+#define PRINT__IS_PRINT__CAR_PRINT__CAR ~, 1,
+#define PRINT__CAR1(x) PRINT__IF(PRINT__IS_PRINT__CAR(PRINT__EXPAND(PRINT__CAR x))) (x) (PRINT__EXPAND(PRINT__CAR x))
+
+#define PRINT__REVERSE(x, y) y, x
+#define PRINT__REVERSE1(x) PRINT__IF(PRINT__IS_PRINT__CAR(PRINT__EXPAND(PRINT__CAR x))) (x) (PRINT__EXPAND(PRINT__REVERSE x))
+
+#define PRINT__ARRAY_LENGTH(arg, type) PRINT__IF(PRINT__IS_PRINT__CDR(PRINT__EXPAND(PRINT__CDR arg))) (sizeof(arg) / sizeof(type)) (PRINT__EXPAND(PRINT__CDR arg))
+#define PRINT__STRING_WITH_LENGTH(arg) PRINT__IF(PRINT__IS_PRINT__CDR(PRINT__EXPAND(PRINT__CDR arg))) () (PRINT__EXPAND(PRINT__CDR arg))
+
+#define PRINT__ARG_STRING(sep, arg) \
+  fprintf(out, PRINT__IF(PRINT__IS_PRINT__CDR(PRINT__EXPAND(PRINT__CDR arg))) ("%s") ("%.*s") sep, PRINT__REVERSE1(arg))
+
+#define PRINT__GET_FORMAT_SPECIFIER_SEP(sep, arg) _Generic((arg), \
   char: "%c" sep, \
-  unsigned char: "%c" sep, \
+  short: "%h" sep, \
+  unsigned short: "%uh" sep, \
   int: "%d" sep, \
   unsigned int: "%u" sep, \
   long: "%l" sep, \
@@ -224,20 +243,73 @@
   unsigned long long: "%ull" sep, \
   float: "%f" sep, \
   double: "%f" sep, \
-  char *: "%s" sep, \
+  long double: "%fL" sep, \
   char[sizeof(arg)]: "%s" sep, \
   void *: "%p" sep, \
   default: "UNKNOWN" sep \
 )
 
-#define PRINT__ARG(specifier, arg) ret += fprintf(out, specifier, arg);
+#define PRINT__ARG_VALUE(sep, arg) \
+  fprintf(out, PRINT__GET_FORMAT_SPECIFIER_SEP(sep, arg), (arg))
+
+#define PRINT__GENERATE_ARRAY_PRINTER(overload, type, format) \
+_Pragma("GCC diagnostic push") \
+_Pragma("GCC diagnostic ignored \"-Wint-to-pointer-cast\"") \
+__attribute__((always_inline)) \
+static inline int __print_array_ ## overload (FILE *out, const char *sep, const char *end, void *arg, int nmemb) { \
+  int ret = fputs("[", out); \
+  int i = 0; \
+  goto skip_1; \
+  for (; i < nmemb; i++) { \
+    ret += fputc(',', out); \
+    ret += fputs(sep, out); \
+skip_1: \
+    ret += fprintf(out, format, ((type *)arg)[i]); \
+  } \
+  ret += fputs("]", out); \
+  ret += fputs(end, out); \
+  return ret; \
+} \
+_Pragma("GCC diagnostic pop")
+
+PRINT__GENERATE_ARRAY_PRINTER(short, short, "%h")
+PRINT__GENERATE_ARRAY_PRINTER(ushort, unsigned short, "%uh")
+PRINT__GENERATE_ARRAY_PRINTER(int, int, "%d")
+PRINT__GENERATE_ARRAY_PRINTER(uint, unsigned int, "%u")
+PRINT__GENERATE_ARRAY_PRINTER(long, long, "%l")
+PRINT__GENERATE_ARRAY_PRINTER(ulong, unsigned long, "%ul")
+PRINT__GENERATE_ARRAY_PRINTER(longlong, long long, "%ll")
+PRINT__GENERATE_ARRAY_PRINTER(ulonglong, unsigned long long, "%ull")
+PRINT__GENERATE_ARRAY_PRINTER(float, float, "%f")
+PRINT__GENERATE_ARRAY_PRINTER(double, double, "%f")
+PRINT__GENERATE_ARRAY_PRINTER(longdouble, long double, "%fL")
+#undef PRINT__GENERATE_ARRAY_PRINTER
+
+#define PRINT__GENERATE_ARG_ARRAY(sep, end, arg, overload, type) \
+  type*: __print_array_ ## overload(out, sep, end, (void *) (intptr_t) (PRINT__CAR1(arg)), PRINT__ARRAY_LENGTH(arg, type)),
+#define PRINT__ARG(sep, end, arg) ret += _Generic(PRINT__CAR1(arg), \
+  PRINT__GENERATE_ARG_ARRAY(sep, end, arg, short, short) \
+  PRINT__GENERATE_ARG_ARRAY(sep, end, arg, ushort, unsigned short) \
+  PRINT__GENERATE_ARG_ARRAY(sep, end, arg, int, int) \
+  PRINT__GENERATE_ARG_ARRAY(sep, end, arg, uint, unsigned int) \
+  PRINT__GENERATE_ARG_ARRAY(sep, end, arg, long, long) \
+  PRINT__GENERATE_ARG_ARRAY(sep, end, arg, ulong, unsigned long) \
+  PRINT__GENERATE_ARG_ARRAY(sep, end, arg, longlong, long long) \
+  PRINT__GENERATE_ARG_ARRAY(sep, end, arg, ulonglong, unsigned long long) \
+  PRINT__GENERATE_ARG_ARRAY(sep, end, arg, float, float) \
+  PRINT__GENERATE_ARG_ARRAY(sep, end, arg, double, double) \
+  PRINT__GENERATE_ARG_ARRAY(sep, end, arg, longdouble, long double) \
+  char *: PRINT__ARG_STRING(end, arg), \
+  default: PRINT__ARG_VALUE(end, arg) \
+);
+
 
 #define PRINT__PRIMITIVE_ARGS_FOREACH_INDIRECT() PRINT__PRIMITIVE_ARGS_FOREACH
 #define PRINT__PRIMITIVE_ARGS_FOREACH(sep, end, x, ...) \
   PRINT__IF(PRINT__IS_NO_ARGS(__VA_ARGS__)) ( \
-    PRINT__ARG(PRINT_GET_FORMAT_SPECIFIER_SEP(end, x), x) \
+    PRINT__ARG(sep, end, x) \
   ) ( \
-    PRINT__ARG(PRINT_GET_FORMAT_SPECIFIER_SEP(sep, x), x) \
+    PRINT__ARG(sep, sep, x) \
     PRINT__OBSTRUCT(PRINT__PRIMITIVE_ARGS_FOREACH_INDIRECT)() (sep, end, __VA_ARGS__) \
   )
 #define PRINT__ARGS_FOREACH(...) PRINT__PRIMITIVE_ARGS_FOREACH(__VA_ARGS__)
